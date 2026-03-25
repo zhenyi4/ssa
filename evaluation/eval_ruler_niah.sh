@@ -61,17 +61,10 @@ for model in MODELS:
             data = json.load(f)
 
         results = data.get("results", {})
+        metrics = results.get(task, {})
 
         for length in LENGTHS:
-            subtask_key = f"{task}_{length}"
-            metrics = results.get(subtask_key, {})
-
-            score = None
-            for metric_key in ["acc,none", "acc", "exact_match,none", "exact_match"]:
-                if metric_key in metrics:
-                    score = metrics[metric_key]
-                    break
-
+            score = metrics.get(f"{length},none")
             all_results[(model, task, length)] = score
 
 # Print formatted table
