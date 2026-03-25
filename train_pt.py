@@ -171,32 +171,46 @@ def get_peft_state_maybe_zero_3(state_dict, bias):
 
 
 class CustomTrainer(Trainer):
-    """Trainer that logs per-component losses (main_loss, sa_loss) from the model."""
+    """Trainer that logs per-component losses aggregated across GPUs and grad accum steps."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._cross_entropy_loss_sum = 0.0
-        self._alignment_loss_sum = 0.0
-        self._custom_loss_count = 0
+        self._tr_cross_entropy_loss = None
+        self._tr_alignment_loss = None
+        self._globalstep_last_custom_logged = 0
 
     def training_step(self, model, inputs, num_items_in_batch=None):
         loss = super().training_step(model, inputs, num_items_in_batch)
 
         unwrapped = self.accelerator.unwrap_model(model)
         if hasattr(unwrapped, '_last_cross_entropy_loss'):
-            self._cross_entropy_loss_sum += unwrapped._last_cross_entropy_loss
-            self._alignment_loss_sum += unwrapped._last_alignment_loss
-            self._custom_loss_count += 1
+            ce = unwrapped._last_cross_entropy_loss / self.args.gradient_accumulation_steps
+            al = unwrapped._last_alignment_loss / self.args.gradient_accumulation_steps
+
+            if self._tr_cross_entropy_loss is None:
+                self._tr_cross_entropy_loss = torch.tensor(0.0, device=ce.device)
+                self._tr_alignment_loss = torch.tensor(0.0, device=al.device)
+
+            self._tr_cross_entropy_loss += ce
+            self._tr_alignment_loss += al
 
         return loss
 
     def log(self, logs, start_time=None):
-        if self._custom_loss_count > 0 and "loss" in logs:
-            logs["cross_entropy"] = round(self._cross_entropy_loss_sum / self._custom_loss_count, 4)
-            logs["alignment"] = round(self._alignment_loss_sum / self._custom_loss_count, 4)
-            self._cross_entropy_loss_sum = 0.0
-            self._alignment_loss_sum = 0.0
-            self._custom_loss_count = 0
+        if self._tr_cross_entropy_loss is not None and "loss" in logs:
+            steps = self.state.global_step - self._globalstep_last_custom_logged
+
+            ce_scalar = self.accelerator.gather(self._tr_cross_entropy_loss).mean().item()
+            al_scalar = self.accelerator.gather(self._tr_alignment_loss).mean().item()
+
+            if steps > 0:
+                logs["cross_entropy"] = round(ce_scalar / steps, 4)
+                logs["alignment"] = round(al_scalar / steps, 4)
+
+            self._tr_cross_entropy_loss -= self._tr_cross_entropy_loss
+            self._tr_alignment_loss -= self._tr_alignment_loss
+            self._globalstep_last_custom_logged = self.state.global_step
+
         super().log(logs, start_time)
 
 
