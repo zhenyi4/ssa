@@ -188,8 +188,8 @@ class CustomTrainer(Trainer):
             al = unwrapped._last_alignment_loss / self.args.gradient_accumulation_steps
 
             if self._tr_cross_entropy_loss is None:
-                self._tr_cross_entropy_loss = torch.tensor(0.0, device=ce.device)
-                self._tr_alignment_loss = torch.tensor(0.0, device=al.device)
+                self._tr_cross_entropy_loss = torch.tensor(0.0, device=loss.device)
+                self._tr_alignment_loss = torch.tensor(0.0, device=loss.device)
 
             self._tr_cross_entropy_loss += ce
             self._tr_alignment_loss += al
