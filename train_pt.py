@@ -169,6 +169,37 @@ def get_peft_state_maybe_zero_3(state_dict, bias):
     to_return = {k: maybe_zero_3(v) for k, v in to_return.items()}
     return to_return
 
+
+class CustomTrainer(Trainer):
+    """Trainer that logs per-component losses (main_loss, sa_loss) from the model."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cross_entropy_loss_sum = 0.0
+        self._alignment_loss_sum = 0.0
+        self._custom_loss_count = 0
+
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        loss = super().training_step(model, inputs, num_items_in_batch)
+
+        unwrapped = self.accelerator.unwrap_model(model)
+        if hasattr(unwrapped, '_last_cross_entropy_loss'):
+            self._cross_entropy_loss_sum += unwrapped._last_cross_entropy_loss
+            self._alignment_loss_sum += unwrapped._last_alignment_loss
+            self._custom_loss_count += 1
+
+        return loss
+
+    def log(self, logs):
+        if self._custom_loss_count > 0 and "loss" in logs:
+            logs["cross_entropy"] = round(self._cross_entropy_loss_sum / self._custom_loss_count, 4)
+            logs["alignment"] = round(self._alignment_loss_sum / self._custom_loss_count, 4)
+            self._cross_entropy_loss_sum = 0.0
+            self._alignment_loss_sum = 0.0
+            self._custom_loss_count = 0
+        super().log(logs)
+
+
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, SelfTrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
@@ -255,7 +286,7 @@ def main():
         extra_kwargs = {"min_lr": float(training_args.min_lr)}
         training_args.lr_scheduler_kwargs = extra_kwargs
     # Setup Trainer
-    trainer = Trainer(
+    trainer = CustomTrainer(
         model=model,
         args=training_args,
         train_dataset=prepared_dataset["train"],

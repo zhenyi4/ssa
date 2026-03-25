@@ -572,7 +572,8 @@ class LlamaNSAForCausalLM(LlamaNSAPreTrainedModel, GenerationMixin):
         if self.training:
             outputs.sa_loss = outputs.sa_loss*10
             loss = loss + outputs.sa_loss
-            print(f"main={loss.item():.4f}, sa={outputs.sa_loss.item():.4f}")
+            self._last_cross_entropy_loss = loss.item()
+            self._last_alignment_loss = outputs.sa_loss.item()
 
         return CausalLMOutputWithPast(
             loss=loss,
