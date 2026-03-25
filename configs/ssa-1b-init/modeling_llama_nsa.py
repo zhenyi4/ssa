@@ -571,9 +571,9 @@ class LlamaNSAForCausalLM(LlamaNSAPreTrainedModel, GenerationMixin):
 
         if self.training:
             outputs.sa_loss = outputs.sa_loss*10
+            self._last_ce_loss = loss.item()
+            self._last_alignment_loss = outputs.sa_loss.item()
             loss = loss + outputs.sa_loss
-            self._last_cross_entropy_loss = loss.detach()
-            self._last_alignment_loss = outputs.sa_loss.detach()
 
         return CausalLMOutputWithPast(
             loss=loss,
