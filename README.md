@@ -136,7 +136,8 @@ python caching_hf.py \
     --dataset_config "default" \
     --text_field "text" \
     --cache_dir "your_address/smollm_cache" \
-    --streaming
+    --streaming \
+    --preprocessing_num_workers 8
 ```
 
 ### Training Script
