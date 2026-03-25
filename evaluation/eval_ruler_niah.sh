@@ -51,7 +51,7 @@ all_results = {}  # (model, task, length) -> score
 for model in MODELS:
     for task in TASKS:
         search_path = os.path.join(OUTDIR, model, task)
-        json_files = glob.glob(os.path.join(search_path, "**", "results.json"), recursive=True)
+        json_files = glob.glob(os.path.join(search_path, "**", "results_*.json"), recursive=True)
         if not json_files:
             print(f"WARNING: No results.json found for {model}/{task}")
             continue
