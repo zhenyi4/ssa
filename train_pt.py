@@ -190,14 +190,14 @@ class CustomTrainer(Trainer):
 
         return loss
 
-    def log(self, logs):
+    def log(self, logs, start_time=None):
         if self._custom_loss_count > 0 and "loss" in logs:
             logs["cross_entropy"] = round(self._cross_entropy_loss_sum / self._custom_loss_count, 4)
             logs["alignment"] = round(self._alignment_loss_sum / self._custom_loss_count, 4)
             self._cross_entropy_loss_sum = 0.0
             self._alignment_loss_sum = 0.0
             self._custom_loss_count = 0
-        super().log(logs)
+        super().log(logs, start_time)
 
 
 def main():
