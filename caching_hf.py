@@ -3,6 +3,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 import json
+import multiprocessing
 
 import datasets
 from datasets import load_dataset, load_from_disk, concatenate_datasets
@@ -21,6 +22,97 @@ random.seed(42)
 Concats = ["\n\n"]
 
 logger = logging.getLogger(__name__)
+
+
+# --- Multiprocessing worker functions (must be top-level for pickling) ---
+
+_worker_tokenizer = None
+
+
+def _init_worker(model_name_or_path):
+    """Initialize tokenizer once per worker process."""
+    global _worker_tokenizer
+    _worker_tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path,
+        truncation_side='left',
+        trust_remote_code=True
+    )
+    if _worker_tokenizer.pad_token is None:
+        _worker_tokenizer.add_special_tokens({"pad_token": _worker_tokenizer.eos_token})
+        _worker_tokenizer.pad_token_id = _worker_tokenizer.eos_token_id
+
+
+def _process_text_example(args):
+    """Worker: tokenize a single text, chunk, and pack."""
+    text, model_max_length = args
+    global _worker_tokenizer
+    tokenizer = _worker_tokenizer
+
+    if not isinstance(text, str) or not text:
+        return []
+
+    message_ids = tokenizer.encode(text, add_special_tokens=False)
+
+    input_ids_list = []
+    for i in range(0, len(message_ids), model_max_length - 1):
+        input_ids_list.append(message_ids[i:i + model_max_length - 1] + [tokenizer.eos_token_id])
+
+    packed = [[]]
+    acc_len = 0
+    for input_ids in input_ids_list:
+        if acc_len + len(input_ids) > model_max_length:
+            packed.append([input_ids])
+            acc_len = len(input_ids)
+        else:
+            packed[-1].append(input_ids)
+            acc_len += len(input_ids)
+
+    return packed
+
+
+def _process_conversation_example(args):
+    """Worker: tokenize a single conversation, chunk, and pack."""
+    conversation, model_max_length = args
+    global _worker_tokenizer
+    tokenizer = _worker_tokenizer
+
+    concat = random.choice(Concats)
+
+    if isinstance(conversation, list):
+        contents = []
+        for turn in conversation:
+            if isinstance(turn, dict) and "content" in turn:
+                content = turn["content"]
+                if isinstance(content, str):
+                    contents.append(content)
+            elif isinstance(turn, str):
+                contents.append(turn)
+        message = concat.join(contents)
+    elif isinstance(conversation, str):
+        message = conversation
+    else:
+        return []
+
+    if not message:
+        return []
+
+    message_ids = tokenizer.encode(message, add_special_tokens=False)
+
+    input_ids_list = []
+    for i in range(0, len(message_ids), model_max_length - 1):
+        input_ids_list.append(message_ids[i:i + model_max_length - 1] + [tokenizer.eos_token_id])
+
+    packed = [[]]
+    acc_len = 0
+    for input_ids in input_ids_list:
+        if acc_len + len(input_ids) > model_max_length:
+            packed.append([input_ids])
+            acc_len = len(input_ids)
+        else:
+            packed[-1].append(input_ids)
+            acc_len += len(input_ids)
+
+    return packed
 
 
 @dataclass
@@ -247,34 +339,88 @@ def main():
     if data_args.streaming:
         # Streaming mode: process in batches and save incrementally
         logger.info("Processing in streaming mode...")
-        batch_size = 10000
+        shard_size = 10000
         shard_idx = 0
         current_batch = {"input_ids": []}
 
-        for i, example in enumerate(raw_dataset):
-            # Process single example
-            single_example = {k: [v] for k, v in example.items()}
-            processed = preprocess_fn(single_example)
-            current_batch["input_ids"].extend(processed["input_ids"])
+        num_workers = data_args.preprocessing_num_workers
+        use_mp = num_workers is not None and num_workers > 1
 
-            if len(current_batch["input_ids"]) >= batch_size:
-                # Save shard
-                shard_dataset = datasets.Dataset.from_dict(current_batch)
-                shard_path = os.path.join(model_args.cache_dir, f"shard-{shard_idx:04d}")
-                shard_dataset.save_to_disk(shard_path)
-                logger.info(f"Saved shard {shard_idx} with {len(current_batch['input_ids'])} samples")
-                shard_idx += 1
-                current_batch = {"input_ids": []}
+        # Choose the right field and worker function
+        if data_args.text_field is not None:
+            extract_field = data_args.text_field
+            worker_fn = _process_text_example
+        else:
+            extract_field = data_args.conversations_field
+            worker_fn = _process_conversation_example
 
-            if data_args.max_samples and i >= data_args.max_samples - 1:
-                break
+        def _save_shard(batch_data, idx):
+            shard_dataset = datasets.Dataset.from_dict(batch_data)
+            shard_path = os.path.join(model_args.cache_dir, f"shard-{idx:04d}")
+            shard_dataset.save_to_disk(shard_path)
+            logger.info(f"Saved shard {idx} with {len(batch_data['input_ids'])} samples")
+
+        if use_mp:
+            logger.info(f"Using {num_workers} workers for parallel tokenization")
+            pool = multiprocessing.Pool(
+                processes=num_workers,
+                initializer=_init_worker,
+                initargs=(model_args.model_name_or_path,)
+            )
+            dispatch_batch_size = max(1000, num_workers * 50)
+            raw_items = []
+
+            for i, example in enumerate(raw_dataset):
+                raw_items.append(example[extract_field])
+
+                if len(raw_items) >= dispatch_batch_size or (
+                    data_args.max_samples and i >= data_args.max_samples - 1
+                ):
+                    # Dispatch batch to worker pool
+                    args_list = [(item, data_args.model_max_length) for item in raw_items]
+                    results = pool.map(worker_fn, args_list, chunksize=max(1, len(args_list) // (num_workers * 4)))
+
+                    for packed_rows in results:
+                        current_batch["input_ids"].extend(packed_rows)
+
+                    raw_items = []
+
+                    # Save shards when large enough
+                    while len(current_batch["input_ids"]) >= shard_size:
+                        _save_shard({"input_ids": current_batch["input_ids"][:shard_size]}, shard_idx)
+                        current_batch["input_ids"] = current_batch["input_ids"][shard_size:]
+                        shard_idx += 1
+
+                if data_args.max_samples and i >= data_args.max_samples - 1:
+                    break
+
+            # Process remaining items
+            if raw_items:
+                args_list = [(item, data_args.model_max_length) for item in raw_items]
+                results = pool.map(worker_fn, args_list, chunksize=max(1, len(args_list) // (num_workers * 4)))
+                for packed_rows in results:
+                    current_batch["input_ids"].extend(packed_rows)
+
+            pool.close()
+            pool.join()
+        else:
+            # Single-process fallback (original logic)
+            for i, example in enumerate(raw_dataset):
+                single_example = {k: [v] for k, v in example.items()}
+                processed = preprocess_fn(single_example)
+                current_batch["input_ids"].extend(processed["input_ids"])
+
+                if len(current_batch["input_ids"]) >= shard_size:
+                    _save_shard(current_batch, shard_idx)
+                    shard_idx += 1
+                    current_batch = {"input_ids": []}
+
+                if data_args.max_samples and i >= data_args.max_samples - 1:
+                    break
 
         # Save remaining data
         if current_batch["input_ids"]:
-            shard_dataset = datasets.Dataset.from_dict(current_batch)
-            shard_path = os.path.join(model_args.cache_dir, f"shard-{shard_idx:04d}")
-            shard_dataset.save_to_disk(shard_path)
-            logger.info(f"Saved final shard {shard_idx} with {len(current_batch['input_ids'])} samples")
+            _save_shard(current_batch, shard_idx)
 
     else:
         # Standard mode: process all at once
@@ -321,4 +467,5 @@ print(dataset[0])
 
 
 if __name__ == "__main__":
+    multiprocessing.set_start_method('spawn', force=True)
     main()
