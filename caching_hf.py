@@ -176,6 +176,10 @@ class DataTrainingArguments:
         default=32,
         metadata={"help": "The number of arrow shards to save."},
     )
+    shard_size: int = field(
+        default=10000,
+        metadata={"help": "Number of samples per shard in streaming mode (default: 10000)"}
+    )
     max_samples: Optional[int] = field(
         default=None,
         metadata={"help": "Maximum number of samples to process (for debugging or subset creation)"}
@@ -339,7 +343,7 @@ def main():
     if data_args.streaming:
         # Streaming mode: process in batches and save incrementally
         logger.info("Processing in streaming mode...")
-        shard_size = 10000
+        shard_size = data_args.shard_size
         shard_idx = 0
         current_batch = {"input_ids": []}
         carry_chunks = []  # cross-document accumulator for packing
