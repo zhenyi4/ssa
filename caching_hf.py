@@ -342,6 +342,8 @@ def main():
         shard_size = 10000
         shard_idx = 0
         current_batch = {"input_ids": []}
+        carry_chunks = []  # cross-document accumulator for packing
+        carry_len = 0
 
         num_workers = data_args.preprocessing_num_workers
         use_mp = num_workers is not None and num_workers > 1
@@ -381,7 +383,16 @@ def main():
                     results = pool.map(worker_fn, args_list, chunksize=max(1, len(args_list) // (num_workers * 4)))
 
                     for packed_rows in results:
-                        current_batch["input_ids"].extend(packed_rows)
+                        for group in packed_rows:
+                            for chunk in group:
+                                if carry_len + len(chunk) > data_args.model_max_length:
+                                    if carry_chunks:
+                                        current_batch["input_ids"].append(carry_chunks)
+                                    carry_chunks = [chunk]
+                                    carry_len = len(chunk)
+                                else:
+                                    carry_chunks.append(chunk)
+                                    carry_len += len(chunk)
 
                     raw_items = []
 
@@ -399,7 +410,16 @@ def main():
                 args_list = [(item, data_args.model_max_length) for item in raw_items]
                 results = pool.map(worker_fn, args_list, chunksize=max(1, len(args_list) // (num_workers * 4)))
                 for packed_rows in results:
-                    current_batch["input_ids"].extend(packed_rows)
+                    for group in packed_rows:
+                        for chunk in group:
+                            if carry_len + len(chunk) > data_args.model_max_length:
+                                if carry_chunks:
+                                    current_batch["input_ids"].append(carry_chunks)
+                                carry_chunks = [chunk]
+                                carry_len = len(chunk)
+                            else:
+                                carry_chunks.append(chunk)
+                                carry_len += len(chunk)
 
             pool.close()
             pool.join()
@@ -408,7 +428,16 @@ def main():
             for i, example in enumerate(raw_dataset):
                 single_example = {k: [v] for k, v in example.items()}
                 processed = preprocess_fn(single_example)
-                current_batch["input_ids"].extend(processed["input_ids"])
+                for group in processed["input_ids"]:
+                    for chunk in group:
+                        if carry_len + len(chunk) > data_args.model_max_length:
+                            if carry_chunks:
+                                current_batch["input_ids"].append(carry_chunks)
+                            carry_chunks = [chunk]
+                            carry_len = len(chunk)
+                        else:
+                            carry_chunks.append(chunk)
+                            carry_len += len(chunk)
 
                 if len(current_batch["input_ids"]) >= shard_size:
                     _save_shard(current_batch, shard_idx)
@@ -417,6 +446,10 @@ def main():
 
                 if data_args.max_samples and i >= data_args.max_samples - 1:
                     break
+
+        # Flush any remaining carry-over chunks
+        if carry_chunks:
+            current_batch["input_ids"].append(carry_chunks)
 
         # Save remaining data
         if current_batch["input_ids"]:
