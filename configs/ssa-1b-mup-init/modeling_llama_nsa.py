@@ -390,13 +390,13 @@ class LlamaNSAPreTrainedModel(PreTrainedModel):
     }
     
     def _init_weights(self, module):
-        std = self.config.initializer_range / math.sqrt(self.config.hidden_size)
+        std = self.config.initializer_range
         if isinstance(module, nn.Linear):
-            module.weight.data.normal_(mean=0.0, std=std)
+            module.weight.data.normal_(mean=0.0, std=std / math.sqrt(module.in_features))
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=std)
+            module.weight.data.normal_(mean=0.0, std=0.02)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
         elif isinstance(module, LigerRMSNorm):
