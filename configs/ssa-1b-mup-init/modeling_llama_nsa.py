@@ -390,9 +390,9 @@ class LlamaNSAPreTrainedModel(PreTrainedModel):
     }
     
     def _init_weights(self, module):
-        std = self.config.initializer_range
+        std = self.config.initializer_range / math.sqrt(self.config.hidden_size)
         if isinstance(module, nn.Linear):
-            module.weight.data.normal_(mean=0.0, std=std / math.sqrt(module.in_features))
+            module.weight.data.normal_(mean=0.0, std=std)
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.Embedding):
