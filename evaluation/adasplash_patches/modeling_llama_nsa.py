@@ -38,7 +38,7 @@ from transformers.modeling_outputs import (
     CausalLMOutputWithPast,
 )
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
-from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
+from transformers.modeling_utils import PreTrainedModel
 from transformers.processing_utils import Unpack
 from transformers.utils import TransformersKwargs, auto_docstring, can_return_tuple, logging
 from transformers.utils.generic import check_model_inputs
@@ -192,27 +192,6 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-def eager_attention_forward(
-    module: nn.Module,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attention_mask: Optional[torch.Tensor],
-    scaling: float,
-    dropout: float = 0.0,
-    **kwargs: Unpack[TransformersKwargs],
-):
-    key_states = repeat_kv(key, module.num_key_value_groups)
-    value_states = repeat_kv(value, module.num_key_value_groups)
-
-    alpha = getattr(module.config, "entmax_alpha", 1.5)
-    niter = getattr(module.config, "entmax_niter", 10)
-
-    attn_output = adasplash(query.contiguous(), key_states.contiguous(), value_states.contiguous(), alpha=alpha, niter=niter, is_causal=True, layer_idx=module.layer_idx)
-    attn_output = attn_output.transpose(1, 2).contiguous()
-
-    return attn_output, None
-
 class LlamaNSAAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -272,20 +251,17 @@ class LlamaNSAAttention(nn.Module):
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
             key_states, value_states = key_states.transpose(1,2), value_states.transpose(1,2)
 
-        attention_interface: Callable = eager_attention_forward
-        if self.config._attn_implementation != "eager":
-            attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
-        
-        attn_output_mha, attn_weights = attention_interface(
-                self,
-                query_states.transpose(1,2),
-                key_states.transpose(1,2),
-                value_states.transpose(1,2),
-                attention_mask,
-                dropout=0.0 if not self.training else self.attention_dropout,
-                scaling=self.scaling,
-                **kwargs,
+        alpha = getattr(self.config, "entmax_alpha", 1.5)
+        niter = getattr(self.config, "entmax_niter", 10)
+
+        attn_output_mha = adasplash(
+            query_states.transpose(1, 2).contiguous(),
+            repeat_kv(key_states.transpose(1, 2), self.num_key_value_groups).contiguous(),
+            repeat_kv(value_states.transpose(1, 2), self.num_key_value_groups).contiguous(),
+            alpha=alpha, niter=niter, is_causal=True, layer_idx=self.layer_idx,
         )
+        attn_output_mha = attn_output_mha.transpose(1, 2).contiguous()
+        attn_weights = None
         attn_output_mha = attn_output_mha * g_slc.unsqueeze(-1) # also gated
 
         
@@ -350,12 +326,12 @@ class LlamaNSAPreTrainedModel(PreTrainedModel):
     supports_gradient_checkpointing = True
     _no_split_modules = ["LlamaNSADecoderLayer"]
     _skip_keys_device_placement = ["past_key_values"]
-    _supports_flash_attn = True
-    _supports_sdpa = True
-    _supports_flex_attn = True
+    _supports_flash_attn = False
+    _supports_sdpa = False
+    _supports_flex_attn = False
 
     _can_compile_fullgraph = True
-    _supports_attention_backend = True
+    _supports_attention_backend = False
     _can_record_outputs = {
         "hidden_states": LlamaNSADecoderLayer,
         "attentions": LlamaNSAAttention,
