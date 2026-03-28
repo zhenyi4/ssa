@@ -50,6 +50,9 @@ from liger_kernel.transformers.rope import liger_rotary_pos_emb
 from liger_kernel.transformers.swiglu import LigerSwiGLUMLP
 
 from adasplash import adasplash
+if not callable(adasplash):
+    # PYTHONPATH includes parent dir, so adasplash resolved to submodule
+    adasplash = adasplash.adasplash
 
 logger = logging.get_logger(__name__)
 
