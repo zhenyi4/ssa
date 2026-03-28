@@ -14,15 +14,14 @@ config = AutoConfig.from_pretrained(config_path, trust_remote_code=True)
 model = AutoModelForCausalLM.from_config(config=config, trust_remote_code=True, attn_implementation="eager").cuda().half()
 
 # Monkey-patch to count calls
-_orig_forward = abm._sparse_attention.forward.__func__
+_orig_apply = abm._sparse_attention.apply
 call_count = [0]
 
-@staticmethod
-def _tracked_forward(ctx, *args, **kwargs):
+def _tracked_apply(*args, **kwargs):
     call_count[0] += 1
-    return _orig_forward(ctx, *args, **kwargs)
+    return _orig_apply(*args, **kwargs)
 
-abm._sparse_attention.forward = _tracked_forward
+abm._sparse_attention.apply = _tracked_apply
 
 # Run one forward pass
 x = torch.randint(0, 1000, (1, 128)).cuda()
