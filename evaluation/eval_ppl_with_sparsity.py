@@ -20,7 +20,7 @@ def main():
 
     results = lm_eval.simple_evaluate(
         model="hf",
-        model_args=f"pretrained={model_path},max_length={max_length},dtype=auto,trust_remote_code=true",
+        model_args=f"pretrained={model_path},max_length={max_length},dtype=auto,trust_remote_code=true,attn_implementation=eager",
         tasks=["wikitext"],
         batch_size=batch_size,
         device="cuda",
