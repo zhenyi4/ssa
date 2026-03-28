@@ -1,12 +1,17 @@
 import json
+import os
 import sys
+
+# Add the adasplash package to sys.path (sibling directory of this project)
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_project_root, "adasplash"))
 
 from adasplash import enable_sparsity_stats, get_sparsity_stats, reset_sparsity_stats
 import lm_eval
 
 
 def main():
-    model_path = sys.argv[1] if len(sys.argv) > 1 else "/Users/zhenyishen/Downloads/adasplash_dir/adasplash-1b-init"
+    model_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_project_root, "adasplash-1b")
     max_length = int(sys.argv[2]) if len(sys.argv) > 2 else 8192
     batch_size = int(sys.argv[3]) if len(sys.argv) > 3 else 8
 
