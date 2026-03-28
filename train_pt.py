@@ -178,6 +178,13 @@ class CustomTrainer(Trainer):
         self._ce_sum = 0.0
         self._al_sum = 0.0
         self._count = 0
+        # Enable adasplash sparsity stats if available
+        try:
+            from adasplash import enable_sparsity_stats, get_sparsity_stats, reset_sparsity_stats
+            enable_sparsity_stats(num_layers=16)
+            self._sparsity_stats_available = True
+        except ImportError:
+            self._sparsity_stats_available = False
 
     def training_step(self, model, inputs, num_items_in_batch=None):
         loss = super().training_step(model, inputs, num_items_in_batch)
@@ -199,6 +206,16 @@ class CustomTrainer(Trainer):
             self._ce_sum = 0.0
             self._al_sum = 0.0
             self._count = 0
+        # Log adasplash zero attention ratio
+        if self._sparsity_stats_available:
+            from adasplash import get_sparsity_stats, reset_sparsity_stats
+            stats = get_sparsity_stats()
+            if stats:
+                total_nz = sum(s["nonzero_elements"] for s in stats.values())
+                total_el = sum(s["total_elements"] for s in stats.values())
+                if total_el > 0:
+                    logs["attn_zero_ratio"] = round(1.0 - total_nz / total_el, 4)
+                reset_sparsity_stats()
         super().log(logs, start_time)
 
 
