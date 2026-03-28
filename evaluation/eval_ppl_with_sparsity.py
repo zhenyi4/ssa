@@ -15,7 +15,8 @@ def main():
     max_length = int(sys.argv[2]) if len(sys.argv) > 2 else 8192
     batch_size = int(sys.argv[3]) if len(sys.argv) > 3 else 8
 
-    enable_sparsity_stats()
+    num_layers = int(sys.argv[4]) if len(sys.argv) > 4 else 16
+    enable_sparsity_stats(num_layers=num_layers)
 
     results = lm_eval.simple_evaluate(
         model="hf",
@@ -45,6 +46,15 @@ def main():
 
     overall_zero_ratio = 1.0 - total_nonzero / max(total_elements, 1)
     print(f"\n  Overall:  zero_ratio = {overall_zero_ratio:.6f}")
+    print("=" * 80)
+
+    # Print PPL results
+    print("\nPERPLEXITY RESULTS")
+    print("=" * 80)
+    for task_name, task_results in results["results"].items():
+        for metric, value in task_results.items():
+            if metric != "alias":
+                print(f"  {task_name}/{metric}: {value}")
     print("=" * 80)
 
     output = {
