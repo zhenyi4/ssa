@@ -1,6 +1,7 @@
 # ==============================Env Variables=================================
 export NCCL_DEBUG=WARN
 export CUDA_HOME=$CONDA_PREFIX
+export PYTHONPATH="$(cd "$(dirname "$0")" && pwd)/adasplash:${PYTHONPATH}"
 
 # Single-node training defaults
 export HOST_NUM=1
