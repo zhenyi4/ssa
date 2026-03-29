@@ -286,6 +286,7 @@ def main():
         model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, config=config, trust_remote_code=True, attn_implementation="flash_attention_2")
     else:
         model = AutoModelForCausalLM.from_config(config=config, trust_remote_code=True, attn_implementation="flash_attention_2")
+    model.config.gradient_accumulation_steps = training_args.gradient_accumulation_steps
     logger.info("load model finished, parameters of model: {}".format(model.num_parameters()))
 
     if training_args.gradient_checkpointing:

@@ -570,11 +570,8 @@ class LlamaNSAForCausalLM(LlamaNSAPreTrainedModel, GenerationMixin):
             loss = ForCausalLMLoss(hidden_states=hidden_states[:, slice_indices, :], labels=labels, lm_head_weights=self.lm_head.weight, hidden_size=self.config.hidden_size, vocab_size=self.config.vocab_size, **kwargs)
 
         if self.training:
-            outputs.sa_loss = outputs.sa_loss * 20
-            num_items_in_batch = kwargs.get("num_items_in_batch", None)
-            if num_items_in_batch is not None:
-                micro_batch_tokens = labels.ne(-100).sum()
-                outputs.sa_loss = outputs.sa_loss * micro_batch_tokens / num_items_in_batch
+            grad_accum = getattr(self.config, 'gradient_accumulation_steps', 1)
+            outputs.sa_loss = outputs.sa_loss * 20 / grad_accum
             loss = loss + outputs.sa_loss
             print(f"main={loss.item():.4f}, sa={outputs.sa_loss.item():.4f}")
 
