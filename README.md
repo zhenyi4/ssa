@@ -130,6 +130,7 @@ SSA models use a custom LLaMA-NSA architecture with the following key configurat
 SSA uses a packing strategy for efficient pre-training. Data should be pre-tokenized by running:
 
 ```bash
+# 8k sequence length (default)
 python caching_hf.py \
     --model_name_or_path "meta-llama/Llama-3.2-1B" \
     --dataset_name "EleutherAI/SmolLM2-135M-100B" \
@@ -138,6 +139,18 @@ python caching_hf.py \
     --cache_dir "your_address/smollm_cache" \
     --streaming \
     --preprocessing_num_workers 8
+
+# 128k sequence length
+python caching_hf.py \
+    --model_name_or_path "meta-llama/Llama-3.2-1B" \
+    --dataset_name "EleutherAI/SmolLM2-135M-100B" \
+    --dataset_config "default" \
+    --text_field "text" \
+    --cache_dir "your_address/smollm_cache" \
+    --streaming \
+    --preprocessing_num_workers 8 \
+    --model_max_length 131072 \
+    --shard_size 1000
 ```
 
 ### Training Script
