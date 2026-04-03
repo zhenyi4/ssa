@@ -27,7 +27,7 @@ from datasets import load_dataset
 
 try:
     from native_sparse_attention.ops.parallel import parallel_nsa
-except ImportError:
+except (ImportError, ValueError):
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "hf_files"))
     from parallel import parallel_nsa
 
