@@ -25,11 +25,33 @@ import matplotlib.pyplot as plt
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
 
-try:
-    from native_sparse_attention.ops.parallel import parallel_nsa
-except (ImportError, ValueError):
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "hf_files"))
-    from parallel import parallel_nsa
+def _import_parallel_nsa():
+    """Import parallel_nsa, working around fla / transformers version conflicts."""
+    # Fix 1: fla registers model configs (e.g. 'bitnet') that already exist in
+    # transformers>=4.54, causing ValueError on re-registration.
+    from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+    _Cls = CONFIG_MAPPING.__class__
+    _orig_register = _Cls.register
+    _Cls.register = lambda self, key, value, exist_ok=False: _orig_register(self, key, value, exist_ok=True)
+
+    try:
+        # Fix 2: fla v0.2.0 lacks some utility functions that the patched
+        # native_sparse_attention/ops/parallel.py imports at module level.
+        # They are only called when cu_seqlens is not None (variable-length),
+        # which we never use, so None stubs are safe.
+        import fla.ops.utils as _fla_utils
+        for _name in ("prepare_chunk_indices", "prepare_chunk_offsets",
+                       "prepare_lens", "prepare_token_indices"):
+            if not hasattr(_fla_utils, _name):
+                setattr(_fla_utils, _name, None)
+
+        from native_sparse_attention.ops.parallel import parallel_nsa as _fn
+        return _fn
+    finally:
+        _Cls.register = _orig_register
+
+
+parallel_nsa = _import_parallel_nsa()
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 BLOCK_SIZE = 16
