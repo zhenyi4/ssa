@@ -158,7 +158,7 @@ def process_layer(hidden_states, layer, cos, sin, sampled_pos, device,
     # Output distance
     of = out_full[0, :, sampled_pos, :].transpose(0, 1).float()  # [N, H, D]
     sp = out_sparse[0, sampled_pos, :, :].float()                 # [N, H, D]
-    d_output = torch.norm(of - sp, dim=-1)                        # [N, H]
+    d_output = torch.nn.functional.smooth_l1_loss(of, sp, reduction="none").mean(dim=-1)  # [N, H]
 
     # Reconstruct sparse attention distribution
     blocks = block_idx[0, sampled_pos, :, :]                      # [N, Hkv, BC]
@@ -242,7 +242,7 @@ def plot_scatter(d_output_all, d_kl_all, corr_per_layer, num_layers, output_dir)
             idx = np.random.RandomState(42).choice(len(x), 2000, replace=False)
             x, y = x[idx], y[idx]
         ax.scatter(x, y, alpha=0.15, s=3)
-        ax.set_xlabel("Output Distance (L2)")
+        ax.set_xlabel("Output Distance (Smooth L1)")
         ax.set_ylabel(r"$\mathrm{KL}(p_\mathrm{sparse}\|p_\mathrm{full})$")
         ax.set_title(f"Layer {li} ($\\rho$={rhos[li]:.3f})")
         ax.grid(True, alpha=0.3)
