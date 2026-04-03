@@ -89,9 +89,15 @@ def apply_rotary_pos_emb(q, k, cos, sin):
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
-def load_sequences(tokenizer, num_sequences, seq_len):
-    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    text = "\n\n".join(t for t in dataset["text"] if t.strip())
+def load_sequences(tokenizer, num_sequences, seq_len, dataset_name="wikitext"):
+    if dataset_name == "pg19":
+        dataset = load_dataset("emozilla/pg19-test", split="test")
+        # pg19 has one long text per row; concatenate all rows
+        text = "\n\n".join(row["text"] for row in dataset)
+    else:
+        dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+        text = "\n\n".join(t for t in dataset["text"] if t.strip())
+
     tokens = tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
     n = len(tokens) // seq_len
     tokens = tokens[: n * seq_len].reshape(n, seq_len)
@@ -257,6 +263,7 @@ def main():
     parser = argparse.ArgumentParser(description="Output-distance vs KL-divergence correlation")
     parser.add_argument("--model", default="zen-E/FullAttn-1B")
     parser.add_argument("--num_sequences", type=int, default=NUM_SEQUENCES)
+    parser.add_argument("--dataset", choices=["wikitext", "pg19"], default="wikitext")
     parser.add_argument("--seq_len", type=int, default=SEQ_LEN)
     parser.add_argument("--min_pos", type=int, default=None,
                         help="Start sampling positions from here. Default: 2 * block_size * block_counts "
@@ -295,8 +302,8 @@ def main():
     print(f"  Sampling positions from {min_pos} to {seq_len - 1} "
           f"(sparse covers <={receptive_field}/{min_pos} = {receptive_field/min_pos:.0%} of context at start)")
 
-    print("Loading WikiText-2...")
-    sequences = load_sequences(tokenizer, args.num_sequences, seq_len)
+    print(f"Loading dataset: {args.dataset}...")
+    sequences = load_sequences(tokenizer, args.num_sequences, seq_len, args.dataset)
     num_seq = sequences.shape[0]
     print(f"  {num_seq} sequences of length {seq_len}")
 
