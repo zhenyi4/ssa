@@ -258,6 +258,9 @@ def main():
     parser.add_argument("--model", default="zen-E/FullAttn-1B")
     parser.add_argument("--num_sequences", type=int, default=NUM_SEQUENCES)
     parser.add_argument("--seq_len", type=int, default=SEQ_LEN)
+    parser.add_argument("--min_pos", type=int, default=None,
+                        help="Start sampling positions from here. Default: 2 * block_size * block_counts "
+                             "(so sparse attention covers at most half the context)")
     parser.add_argument("--output_dir", default=os.path.join(os.path.dirname(__file__), "output"))
     args = parser.parse_args()
 
@@ -279,8 +282,18 @@ def main():
 
     # ── Load data ──
     seq_len = args.seq_len
-    min_pos = BLOCK_SIZE * BLOCK_COUNTS  # ensure enough blocks for full selection
-    assert seq_len > min_pos, f"seq_len ({seq_len}) must be > block_size*block_counts ({min_pos})"
+    receptive_field = BLOCK_SIZE * BLOCK_COUNTS  # 256 tokens covered by sparse attn
+    if args.min_pos is not None:
+        min_pos = args.min_pos
+    else:
+        # Default: sparse attention covers at most half the context,
+        # so the sparsity is non-trivial
+        min_pos = receptive_field * 2
+    assert min_pos >= receptive_field, (
+        f"--min_pos ({min_pos}) must be >= block_size*block_counts ({receptive_field})")
+    assert seq_len > min_pos, f"seq_len ({seq_len}) must be > min_pos ({min_pos})"
+    print(f"  Sampling positions from {min_pos} to {seq_len - 1} "
+          f"(sparse covers <={receptive_field}/{min_pos} = {receptive_field/min_pos:.0%} of context at start)")
 
     print("Loading WikiText-2...")
     sequences = load_sequences(tokenizer, args.num_sequences, seq_len)
