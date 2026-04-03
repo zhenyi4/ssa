@@ -89,12 +89,12 @@ def apply_rotary_pos_emb(q, k, cos, sin):
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
-def load_sequences(tokenizer, num_sequences):
+def load_sequences(tokenizer, num_sequences, seq_len):
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
     text = "\n\n".join(t for t in dataset["text"] if t.strip())
     tokens = tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
-    n = len(tokens) // SEQ_LEN
-    tokens = tokens[: n * SEQ_LEN].reshape(n, SEQ_LEN)
+    n = len(tokens) // seq_len
+    tokens = tokens[: n * seq_len].reshape(n, seq_len)
     if tokens.shape[0] < num_sequences:
         print(f"Warning: only {tokens.shape[0]} sequences available")
     return tokens[: min(num_sequences, tokens.shape[0])]
@@ -257,6 +257,7 @@ def main():
     parser = argparse.ArgumentParser(description="Output-distance vs KL-divergence correlation")
     parser.add_argument("--model", default="zen-E/FullAttn-1B")
     parser.add_argument("--num_sequences", type=int, default=NUM_SEQUENCES)
+    parser.add_argument("--seq_len", type=int, default=SEQ_LEN)
     parser.add_argument("--output_dir", default=os.path.join(os.path.dirname(__file__), "output"))
     args = parser.parse_args()
 
@@ -277,10 +278,14 @@ def main():
     print(f"  {num_layers} layers, {num_heads} Q heads, {num_kv_heads} KV heads, d={head_dim}")
 
     # ── Load data ──
+    seq_len = args.seq_len
+    min_pos = BLOCK_SIZE * BLOCK_COUNTS  # ensure enough blocks for full selection
+    assert seq_len > min_pos, f"seq_len ({seq_len}) must be > block_size*block_counts ({min_pos})"
+
     print("Loading WikiText-2...")
-    sequences = load_sequences(tokenizer, args.num_sequences)
+    sequences = load_sequences(tokenizer, args.num_sequences, seq_len)
     num_seq = sequences.shape[0]
-    print(f"  {num_seq} sequences of length {SEQ_LEN}")
+    print(f"  {num_seq} sequences of length {seq_len}")
 
     # ── Pre-allocate results ──
     d_output_all = np.zeros((num_layers, num_seq, NUM_SAMPLED, num_heads), dtype=np.float32)
@@ -288,7 +293,7 @@ def main():
 
     # ── Pre-compute reusable tensors ──
     causal_mask = torch.triu(
-        torch.full((SEQ_LEN, SEQ_LEN), float("-inf"), device=device), diagonal=1
+        torch.full((seq_len, seq_len), float("-inf"), device=device), diagonal=1
     )
     block_offsets = torch.arange(BLOCK_SIZE, device=device)
 
@@ -297,12 +302,12 @@ def main():
         input_ids = sequences[seq_idx].unsqueeze(0).to(device)
 
         sampled_pos = torch.from_numpy(
-            np.sort(np.random.choice(range(MIN_POS, SEQ_LEN), NUM_SAMPLED, replace=False))
+            np.sort(np.random.choice(range(min_pos, seq_len), NUM_SAMPLED, replace=False))
         ).to(device)
 
         with torch.no_grad():
             hidden_states = model.model.embed_tokens(input_ids)
-            position_ids = torch.arange(SEQ_LEN, device=device).unsqueeze(0)
+            position_ids = torch.arange(seq_len, device=device).unsqueeze(0)
             cos, sin = model.model.rotary_emb(hidden_states, position_ids)
 
             for li in range(num_layers):
