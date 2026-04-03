@@ -6,7 +6,7 @@ Tests whether minimizing L2 distance between full and sparse attention outputs
 correlates with minimizing KL(p_sparse || p_full) between their distributions.
 
 Usage:
-    python experiments/correlation_analysis.py [--model meta-llama/Llama-3.2-1B] [--num_sequences 100]
+    python experiments/correlation_analysis.py [--model zen-E/FullAttn-1B] [--num_sequences 100]
 """
 
 import os
@@ -255,7 +255,7 @@ def plot_scatter(d_output_all, d_kl_all, corr_per_layer, num_layers, output_dir)
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="Output-distance vs KL-divergence correlation")
-    parser.add_argument("--model", default="meta-llama/Llama-3.2-1B")
+    parser.add_argument("--model", default="zen-E/FullAttn-1B")
     parser.add_argument("--num_sequences", type=int, default=NUM_SEQUENCES)
     parser.add_argument("--output_dir", default=os.path.join(os.path.dirname(__file__), "output"))
     args = parser.parse_args()
