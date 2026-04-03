@@ -27,12 +27,20 @@ from datasets import load_dataset
 
 def _import_parallel_nsa():
     """Import parallel_nsa, working around fla / transformers version conflicts."""
-    # Fix 1: fla registers model configs (e.g. 'bitnet') that already exist in
-    # transformers>=4.54, causing ValueError on re-registration.
+    # Fix 1: fla v0.2.0 registers model types (bitnet, etc.) that already exist
+    # in transformers>=4.54.  Both CONFIG_MAPPING.register and the AutoModel-style
+    # _model_mapping.register raise ValueError on duplicates.  We temporarily make
+    # all of them permissive (exist_ok=True).
     from transformers.models.auto.configuration_auto import CONFIG_MAPPING
-    _Cls = CONFIG_MAPPING.__class__
-    _orig_register = _Cls.register
-    _Cls.register = lambda self, key, value, exist_ok=False: _orig_register(self, key, value, exist_ok=True)
+    from transformers import AutoModel
+
+    patches = []  # (cls, original_method) pairs to restore
+
+    for obj in (CONFIG_MAPPING, AutoModel._model_mapping):
+        cls = obj.__class__
+        orig = cls.register
+        cls.register = lambda self, key, value, exist_ok=False, _orig=orig: _orig(self, key, value, exist_ok=True)
+        patches.append((cls, orig))
 
     try:
         # Fix 2: fla v0.2.0 lacks some utility functions that the patched
@@ -48,7 +56,8 @@ def _import_parallel_nsa():
         from native_sparse_attention.ops.parallel import parallel_nsa as _fn
         return _fn
     finally:
-        _Cls.register = _orig_register
+        for cls, orig in patches:
+            cls.register = orig
 
 
 parallel_nsa = _import_parallel_nsa()
