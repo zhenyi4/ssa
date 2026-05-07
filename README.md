@@ -10,7 +10,7 @@
 
 # SSA: Sparse Sparse Attention
 
-This is the official implementation of the paper: [SSA: Sparse Sparse Attention by Aligning Full and Sparse Attention Outputs in Feature Space](https://arxiv.org/abs/2511.20102).
+This is the official implementation of the paper: [SSA: Sparse Sparse Attention by Aligning Full and Sparse Attention Outputs in Feature Space](https://arxiv.org/abs/2511.20102). Accepted by ICML 2026 🎉
 
 ## Overview
 
